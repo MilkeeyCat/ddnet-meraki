@@ -1,4 +1,5 @@
 fn printf(format: *i8) -> void;
+fn memset(src: *void, value: u8, size: usize) -> void;
 
 fn variableint_pack(dest: *u8, i: isize, dest_size: usize) -> *u8 {
     if dest_size < 0 || dest_size == 0 {
@@ -65,8 +66,34 @@ fn variableint_unpack(src: *u8, dest: *isize, size: usize) -> *u8 {
 	return src;
 }
 
+struct Packer {
+	buffer: u8[2048];
+	current: *u8;
+	end: *u8;
+	error: bool;
+
+    fn add_int(i: isize) -> void {
+        if this->error {
+            return;
+        }
+
+        if variableint_pack(this->current, i, this->end as usize - this->current as usize) == NULL {
+            return;
+        }
+    }
+
+    fn reset() -> void {
+        this->error = false;
+        this->current = this->buffer as *u8;
+        this->end = this->current as *u8 + 2048;
+    }
+}
+
 fn main() -> u8 {
-    printf("Hello tees!\n");
+    let packer: Packer = Packer{};
+    memset(&packer as *void, 0, 4096);
+    packer.reset();
+    packer.add_int(69);
 
     return 0;
 }
