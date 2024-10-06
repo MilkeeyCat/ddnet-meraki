@@ -1,5 +1,6 @@
 fn printf(format: *i8) -> void;
 fn memset(src: *void, value: u8, size: usize) -> void;
+fn memcpy(dest: *void, src: *void, size: usize) -> void;
 
 fn variableint_pack(dest: *u8, i: isize, dest_size: usize) -> *u8 {
     if dest_size < 0 || dest_size == 0 {
@@ -87,6 +88,24 @@ struct Packer {
         this->current = this->buffer as *u8;
         this->end = this->current as *u8 + 2048;
     }
+
+
+    fn add_raw(data: *void, size: usize) -> void {
+        if this->error {
+            return;
+        }
+
+        if this->current + size > this->end {
+            this->error = true;
+
+            return;
+        }
+
+        memcpy(this->current as *void, data, size);
+
+        this->current = this->current + size;
+    }
+
 }
 
 fn main() -> u8 {
