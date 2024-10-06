@@ -78,9 +78,14 @@ struct Packer {
             return;
         }
 
-        if variableint_pack(this->current, i, this->end as usize - this->current as usize) == NULL {
+        let next: *u8 = variableint_pack(this->current, i, this->end as usize - this->current as usize);
+        if next == NULL {
+            this->error = true;
+
             return;
         }
+
+        this->current = next;
     }
 
     fn reset() -> void {
@@ -106,6 +111,9 @@ struct Packer {
         this->current = this->current + size;
     }
 
+    fn size() -> usize {
+        return this->current as usize - this->buffer as *u8 as usize;
+    }
 }
 
 fn main() -> u8 {
