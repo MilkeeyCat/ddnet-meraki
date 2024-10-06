@@ -1,6 +1,18 @@
 fn printf(format: *i8, _: u8) -> void;
 fn memset(src: *void, value: u8, size: usize) -> void;
 fn memcpy(dest: *void, src: *void, size: usize) -> void;
+fn socket(domain: u32, type: u32, protocol: u32) -> i32;
+fn sendto(fd: i32, buf: *void, n: usize, flags: u32, addr: *SockAddr, addr_len: usize) -> isize;
+fn inet_addr(host: *i8) -> u32;
+fn htons(host: u16) -> u16;
+fn close(fd: i32) -> i32;
+
+struct SockAddr {
+    family: u16;
+    port: u16;
+    addr: u32;
+    _: u8; // padding
+}
 
 fn variableint_pack(dest: *u8, i: isize, dest_size: usize) -> *u8 {
     if dest_size < 0 || dest_size == 0 {
@@ -149,11 +161,97 @@ struct Packer {
     }
 }
 
+struct NetChunk {
+	client_id: u32;
+	address: *void;
+	flags: u32;
+	data_size: u32;
+	data: *void;
+}
+
+struct NetPacketConstruct {
+	flags: u32;
+	ack: u32;
+	num_chunks: u32;
+	data_size: u32;
+	chunk_data: u8[1394];
+}
+
+struct NetConnection {
+    ack: usize;
+    sock_addr: SockAddr;
+
+    fn send_connect(fd: i32) -> void {
+        let MAGIC: u8[4] = [84, 75, 69, 78];
+
+        // FIXME: add syntax to call methods using -> operator
+        (*this).send_ctrl_msg(fd, 1, MAGIC as *u8 as *void, 4 as u32, 1 as u32);
+    }
+
+    fn send_ctrl_msg(fd: i32, ctrl_msg: u8, extra: *void, extra_size: u32, token: u32) -> void {
+        // 4 - NET_PACKETFLAG_CONTROL
+        let construct: NetPacketConstruct = NetPacketConstruct {
+            flags: 4,
+            ack: this->ack,
+            num_chunks: 0,
+            data_size: 1 + extra_size,
+        };
+
+        construct.chunk_data[0] = ctrl_msg;
+
+        if extra != NULL {
+            memcpy(&construct.chunk_data[1] as *void, extra, extra_size as usize);
+        }
+
+        (*this).send_packet(fd, &construct, token);
+    }
+
+    fn send_packet(fd: i32, packet: *NetPacketConstruct, token: u32) -> void {
+        let buffer: u8[1400];
+
+        memcpy((packet->chunk_data as *u8 + packet->data_size as usize) as *void, &token as *void, 4);
+		packet->data_size = packet->data_size + 4;
+
+        // NOTE: if you use `packet->chunk_data as *void`, it shows absurd error message xd
+		memcpy(&buffer[3] as *void, packet->chunk_data as *u8 as *void, packet->data_size as usize);
+        // 32 - NET_PACKETFLAG_COMPRESSION
+		packet->flags = packet->flags & ~32;
+
+        // That's a lot of casts btw :\
+        buffer[0] = (((packet->flags << 2) & 252) | ((packet->ack >> 8) & 3)) as u8;
+		buffer[1] = (packet->ack & 255) as u8;
+		buffer[2] = packet->num_chunks as u8;
+
+        sendto(fd, buffer as *u8 as *void, packet->data_size as usize, 0 as u32, &this->sock_addr, 16 as usize);
+    }
+}
+
+struct Client {
+    net_conn: NetConnection;
+}
+
 fn main() -> u8 {
-    let packer: Packer = Packer{};
-    memset(&packer as *void, 0, 4096);
-    packer.reset();
-    packer.add_int(69);
+    // (AF_INET, SOCK_DGRAM, 0)
+    let fd: i32 = socket(2, 2, 0);
+    if fd < 0 {
+        printf("Failed to get socket fd", 0);
+        return 1;
+    } else {
+        printf("Created socket successfully", 0);
+    }
+
+    let client: Client = Client {
+        net_conn: NetConnection {
+            ack: 0,
+            sock_addr: SockAddr {
+                family: 2,
+                addr: inet_addr("127.0.0.1"),
+                port: htons(42069),
+            },
+        },
+    };
+
+    client.net_conn.send_connect(fd);
 
     return 0;
 }
