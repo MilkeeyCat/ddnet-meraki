@@ -1,4 +1,4 @@
-fn printf(format: *i8) -> void;
+fn printf(format: *i8, _: u8) -> void;
 fn memset(src: *void, value: u8, size: usize) -> void;
 fn memcpy(dest: *void, src: *void, size: usize) -> void;
 
@@ -113,6 +113,39 @@ struct Packer {
 
     fn size() -> usize {
         return this->current as usize - this->buffer as *u8 as usize;
+    }
+
+    fn add_string(str: *i8, limit: usize) -> void {
+        if this->error {
+            return;
+        }
+
+        if limit == 0 {
+            limit = 2048;
+        }
+
+        while *str != 0 && limit != 0 {
+            // We don't use utf-8 here
+            let length: usize = 1;
+            // Had to group because the parser thinks it's struct expression xd
+            if (limit < length) {
+                break;
+            }
+            // Ensure space for the null termination.
+            if this->end as *u8 as usize - this->current as *u8 as usize < length + 1 {
+                this->error = true;
+                break;
+            }
+
+            // Why did I make char to be of type i8? :\
+            *this->current = *str as u8;
+            str = str + 1;
+            this->current = this->current + 1;
+            limit = limit - length;
+        }
+
+        *this->current = 0;
+        this->current = this->current + 1;
     }
 }
 
