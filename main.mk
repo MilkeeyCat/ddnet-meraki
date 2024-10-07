@@ -3,6 +3,7 @@ fn memset(src: *void, value: u8, size: usize) -> void;
 fn memcpy(dest: *void, src: *void, size: usize) -> void;
 fn socket(domain: u32, type: u32, protocol: u32) -> i32;
 fn sendto(fd: i32, buf: *void, n: usize, flags: u32, addr: *SockAddr, addr_len: usize) -> isize;
+fn recvfrom(fd: i32, buf: *void, n: usize, flags: u32, addr: *SockAddr, addr_len: *u32) -> isize;
 fn inet_addr(host: *i8) -> u32;
 fn htons(host: u16) -> u16;
 fn close(fd: i32) -> i32;
@@ -177,15 +178,35 @@ struct NetPacketConstruct {
 	chunk_data: u8[1394];
 }
 
+struct NetRecvUnpacker {
+	valid: bool;
+	connection: *NetConnection;
+	current_chunk: u32;
+	client_id: u32;
+	data: NetPacketConstruct;
+	buffer: u8[1400];
+
+	fn start(connection: *NetConnection, client_id: u32) -> void {
+        this->connection = connection;
+        this->client_id = client_id;
+        this->current_chunk = 0;
+        this->valid = true;
+    }
+
+	fn fetch_chunk(chunk: *NetChunk) -> u8 {
+    }
+}
+
 struct NetConnection {
     ack: usize;
+    token: u32;
     sock_addr: SockAddr;
 
     fn send_connect(fd: i32) -> void {
         let MAGIC: u8[4] = [84, 75, 69, 78];
 
         // FIXME: add syntax to call methods using -> operator
-        (*this).send_ctrl_msg(fd, 1, MAGIC as *u8 as *void, 4 as u32, 1 as u32);
+        (*this).send_ctrl_msg(fd, 1, MAGIC as *u8 as *void, 4 as u32, -1 as u32);
     }
 
     fn send_ctrl_msg(fd: i32, ctrl_msg: u8, extra: *void, extra_size: u32, token: u32) -> void {
@@ -222,22 +243,56 @@ struct NetConnection {
 		buffer[1] = (packet->ack & 255) as u8;
 		buffer[2] = packet->num_chunks as u8;
 
-        sendto(fd, buffer as *u8 as *void, packet->data_size as usize, 0 as u32, &this->sock_addr, 16 as usize);
+        let final_size: usize = packet->data_size as usize + 3;
+        sendto(fd, buffer as *u8 as *void, final_size, 0 as u32, &this->sock_addr, 16 as usize);
+    }
+
+    fn unpack_packet(buffer: *u8, size: usize, packet: *NetPacketConstruct, token: *u32) -> bool {
+        if size < 3 || size > 1400 {
+            return false;
+        }
+
+        packet->flags = (*buffer >> 2) as u32;
+
+        if (packet->flags & 8) != 0 {
+            printf("CONNLESS PACKET", 0);
+
+            return false;
+        } else {
+            // FIXME: allow dereferencing (ptr + ..) expresions
+            let tmp: *u8 = buffer + 1;
+            packet->ack = (((*buffer & 3) << 8) | *tmp) as u32;
+            tmp = buffer + 2;
+            packet->num_chunks = *tmp as u32;
+            packet->data_size = (size - 3) as u32;
+
+            // It doesn't get called for some reason xd
+            if (packet->flags & 32) != 0 {
+                printf("It's compressed :(", 0);
+
+                return false;
+            } else {
+                memcpy(packet->chunk_data as *u8 as *void, (buffer + 3) as *void, packet->data_size as usize);
+            }
+        }
+
+        return true;
     }
 }
 
 struct Client {
     net_conn: NetConnection;
+    recv_unpacker: NetRecvUnpacker;
 }
 
 fn main() -> u8 {
     // (AF_INET, SOCK_DGRAM, 0)
     let fd: i32 = socket(2, 2, 0);
     if fd < 0 {
-        printf("Failed to get socket fd", 0);
+        printf("Failed to get socket fd\n", 0);
         return 1;
     } else {
-        printf("Created socket successfully", 0);
+        printf("Created socket successfully\n", 0);
     }
 
     let client: Client = Client {
@@ -252,6 +307,19 @@ fn main() -> u8 {
     };
 
     client.net_conn.send_connect(fd);
+
+    while true {
+        let buf: u8[256];
+        memset(&buf as *void, 0, 256);
+
+        // 64 - MSG_DONTWAIT
+        let bytes_read: isize = recvfrom(fd, &buf as *void, 256, 64, NULL, NULL);
+
+        if bytes_read != -1 {
+            let token: u32 = 0;
+            let success: bool = client.net_conn.unpack_packet(&buf as *void, bytes_read as usize, &client.recv_unpacker.data, token);
+        }
+    }
 
     return 0;
 }
