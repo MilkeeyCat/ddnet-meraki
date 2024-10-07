@@ -280,6 +280,21 @@ struct NetConnection {
     }
 }
 
+//Don't look below
+fn bytes_be_to_uint(bytes: *u8) -> u32 {
+    let tmp: *u8 = bytes;
+
+    let tmp1: u32 = ((*tmp & 255) << 24) as u32;
+    tmp = tmp + 1;
+    let tmp2: u32 = ((*tmp & 255) << 16) as u32;
+    tmp = tmp + 1;
+    let tmp3: u32 = ((*tmp & 255) << 8) as u32;
+    tmp = tmp + 1;
+    let tmp4: u32 = (*tmp & 255) as u32;
+
+    return tmp1 | tmp2 | tmp3 | tmp4;
+}
+
 struct Client {
     net_conn: NetConnection;
     recv_unpacker: NetRecvUnpacker;
@@ -318,6 +333,19 @@ fn main() -> u8 {
         if bytes_read != -1 {
             let token: u32 = 0;
             let success: bool = client.net_conn.unpack_packet(&buf as *void, bytes_read as usize, &client.recv_unpacker.data, token);
+            if (success) {
+                    let packet: *NetPacketConstruct = &client.recv_unpacker.data;
+                    // 4 - NET_PACKETFLAG_CONTROL
+                	if (packet->flags & 4) != 0 {
+                        let ctrl_msg: u8 = packet->chunk_data[0];
+
+                        // 2 - NET_CTRLMSG_CONNECTACCEPT
+                        if ctrl_msg == 2 {
+                            client.net_conn.token = bytes_be_to_uint(&packet->chunk_data[5]);
+                        }
+                    }
+
+            }
         }
     }
 
